@@ -16,6 +16,13 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 const API_BASE = "/api";
 const AuthContext = createContext(null);
 
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
 export function AuthProvider({ children }) {
   // Local state for fallback local HS256 auth
   const [user, setUser] = useState(null);       // { email, role, name, organization_id, mfa_enabled, mfa_verified }
@@ -134,33 +141,20 @@ export function AuthProvider({ children }) {
   const completeMfa = useCallback(async (email, code) => {
     setError(null);
     try {
-      let res = await fetch(`${API_BASE}/auth/mfa/verify-login`, {
+      const res = await fetch(`${API_BASE}/auth/mfa/verify-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ email, code }),
       });
-      let data = await res.json();
+      const data = await res.json();
 
       if (res.ok && data.authenticated) {
         await checkSession();
         return { success: true, data };
       }
 
-      res = await fetch(`${API_BASE}/auth/otp/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email, code, purpose: "login_mfa" }),
-      });
-      data = await res.json();
-
-      if (res.ok && data.verified && data.authenticated) {
-        await checkSession();
-        return { success: true, data };
-      }
-
-      const msg = data.reason || data.message || "Invalid or expired passcode. Please try again.";
+      const msg = data.reason || data.message || "Invalid TOTP or recovery code.";
       setError(msg);
       return { success: false, message: msg };
     } catch (err) {
@@ -193,13 +187,17 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  // ── Logout ───────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
       if (user?.email) {
+        const csrfToken = getCookie("adaptivescan_csrf");
+        const headers = { "Content-Type": "application/json" };
+        if (csrfToken) {
+          headers["X-CSRF-Token"] = csrfToken;
+        }
         await fetch(`${API_BASE}/auth/logout`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           credentials: "include",
           body: JSON.stringify({ email: user.email }),
         });

@@ -1,25 +1,25 @@
 :root {
-  --bg: #070a0f;
-  --sidebar: #0b1018;
-  --topbar: rgba(13, 18, 29, 0.86);
-  --surface: #101720;
-  --surface-2: #141d29;
-  --surface-3: #1a2533;
-  --border: #243247;
-  --border-soft: rgba(148, 163, 184, 0.14);
-  --text: #e5ecf7;
-  --muted: #8fa1b8;
-  --subtle: #64748b;
-  --accent: #47d5c6;
-  --accent-2: #7aa7ff;
-  --danger: #fb7185;
-  --warn: #fbbf24;
-  --good: #34d399;
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
-  --radius: 8px;
+  --bg: #000000;
+  --sidebar: #000000;
+  --topbar: rgba(0, 0, 0, 0.7);
+  --surface: #000000;
+  --surface-2: #090909;
+  --surface-3: #111111;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-soft: rgba(255, 255, 255, 0.05);
+  --text: #ffffff;
+  --muted: #a0a0a0;
+  --subtle: #666666;
+  --accent: #ffffff;
+  --accent-2: #eaeaea;
+  --danger: #ff0055;
+  --warn: #ffcc00;
+  --good: #00ffaa;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  --radius: 10px;
   color: var(--text);
   background: var(--bg);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Space Mono", monospace;
 }
 
 .public-shell {

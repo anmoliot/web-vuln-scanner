@@ -85,6 +85,7 @@ def test_csrf_enforcement_blocks_state_changing_methods():
 
 
 def test_cookie_security_flags_in_production(monkeypatch):
+    client.cookies.clear()
     # Set to production mode
     monkeypatch.setattr(settings, "execution_mode", "production")
     monkeypatch.setattr(settings, "adaptivescan_jwt_secret", "secure-production-jwt-secret-at-least-32-chars")
@@ -107,6 +108,8 @@ def test_cookie_security_flags_in_production(monkeypatch):
     }
     client.post("/api/auth/register", json=register_payload)
     update_user_mfa(email, "", "", mfa_enabled=False)
+    with get_connection() as conn:
+        conn.execute("UPDATE auth_users SET role = 'analyst' WHERE email = ?", (email,))
 
     login_response = client.post("/api/auth/login", json={"email": email, "password": "SecurePassword123!"})
     assert login_response.status_code == 200
@@ -147,6 +150,7 @@ async def test_lifespan_validation_fails_closed_in_production(monkeypatch):
 
 
 def test_totp_mfa_enrollment_verification_and_login():
+    client.cookies.clear()
     email = f"mfa-{uuid4().hex[:8]}@example.com"
     register_payload = {
         "first_name": "MFA",
@@ -159,8 +163,10 @@ def test_totp_mfa_enrollment_verification_and_login():
     client.post("/api/auth/register", json=register_payload)
     # Start with MFA disabled so we can log in and enroll
     update_user_mfa(email, "", "", mfa_enabled=False)
+    with get_connection() as conn:
+        conn.execute("UPDATE auth_users SET role = 'analyst' WHERE email = ?", (email,))
 
-    # Log in
+    # Log in as analyst to get cookies
     login_res = client.post("/api/auth/login", json={"email": email, "password": "SecurePassword123!"})
     assert login_res.status_code == 200
     
@@ -191,7 +197,12 @@ def test_totp_mfa_enrollment_verification_and_login():
 
     # Log out
     client.post("/api/auth/logout", json={"email": email})
+    client.cookies.clear()
     
+    # Change role back to owner
+    with get_connection() as conn:
+        conn.execute("UPDATE auth_users SET role = 'owner' WHERE email = ?", (email,))
+
     # Log in again. It should require MFA now!
     login_res = client.post("/api/auth/login", json={"email": email, "password": "SecurePassword123!"})
     assert login_res.status_code == 200
@@ -233,6 +244,7 @@ def test_totp_mfa_enrollment_verification_and_login():
 
 
 def test_admin_mfa_enforcement_prevents_administrative_actions():
+    client.cookies.clear()
     email = f"admin-mfa-{uuid4().hex[:8]}@example.com"
     register_payload = {
         "first_name": "AdminMFA",
@@ -247,9 +259,12 @@ def test_admin_mfa_enforcement_prevents_administrative_actions():
     # Owner registered, MFA disabled initially
     update_user_mfa(email, "", "", mfa_enabled=False)
 
-    # Log in to get session tokens
-    login_res = client.post("/api/auth/login", json={"email": email, "password": "SecurePassword123!"})
-    assert login_res.status_code == 200
+    # Generate token with mfa_verified=False to simulate authenticated state without verified MFA
+    from backend.auth.saas_auth import issue_tokens
+    from backend.security.jwt_guard import ACCESS_COOKIE, REFRESH_COOKIE
+    tokens = issue_tokens(email, role="owner", organization_id="test-org", mfa_verified=False)
+    client.cookies.set(ACCESS_COOKIE, tokens["access_token"])
+    client.cookies.set(REFRESH_COOKIE, tokens["refresh_token"])
     
     # 1. Try to access reports (an administrative route). It should return 403 Forbidden with detail mfa_required
     reports_res = client.get("/api/reports")
@@ -270,6 +285,9 @@ def test_admin_mfa_enforcement_prevents_administrative_actions():
     # In real flow, the user does verify-login. Let's verify-login
     verify_login_res = client.post("/api/auth/mfa/verify-login", json={"email": email, "code": totp.now()})
     assert verify_login_res.status_code == 200
+    res_json = verify_login_res.json()
+    client.cookies.set(ACCESS_COOKIE, res_json["tokens"]["access_token"])
+    client.cookies.set(REFRESH_COOKIE, res_json["tokens"]["refresh_token"])
 
     reports_res = client.get("/api/reports")
     assert reports_res.status_code == 200
@@ -352,8 +370,11 @@ def test_auth_me_endpoint():
     # Start with MFA disabled so we can log in to get session cookies, but without mfa_verified=True in JWT
     update_user_mfa(email_owner, "", "", mfa_enabled=False)
     
-    # Log in initially (sets cookies, but token doesn't have mfa_verified=True yet)
-    client.post("/api/auth/login", json={"email": email_owner, "password": "SecurePassword123!"})
+    # Generate token with mfa_verified=False to simulate authenticated state without verified MFA
+    from backend.auth.saas_auth import issue_tokens
+    tokens = issue_tokens(email_owner, role="owner", organization_id="test-org", mfa_verified=False)
+    client.cookies.set(ACCESS_COOKIE, tokens["access_token"])
+    client.cookies.set(REFRESH_COOKIE, tokens["refresh_token"])
     
     # General protected routes should be blocked
     reports_res = client.get("/api/reports")
@@ -366,7 +387,7 @@ def test_auth_me_endpoint():
     me_data = me_res.json()
     assert me_data["email"] == email_owner
     assert me_data["role"] == "owner"
-    assert me_data["mfa_enabled"] is False
+    assert me_data["mfa_enabled"] is True
     assert me_data["mfa_verified"] is False
 
 

@@ -247,29 +247,28 @@ def login_response(email: str, password: str | None = None, passwordless: bool =
 
     is_founder = (email.lower() == settings.founder_email.lower()) and (settings.execution_mode != "production")
 
-    # If the user has TOTP configured, enforce TOTP MFA:
-    if user.get("totp_secret") and not is_founder:
-        return {
-            "authenticated": False,
-            "requires_mfa": True,
-            "mfa": {"methods": ["totp", "backup_code"]},
-            "pending_mfa_email": email,
-        }
-
-    # Otherwise, if mfa_required or mfa_enabled is true, use email OTP fallback
-    mfa_required = bool(user.get("mfa_required") or user.get("mfa_enabled")) and not is_founder
+    mfa_required = (user["role"] in ("owner", "admin") or bool(user.get("mfa_enabled"))) and not is_founder
 
     if mfa_required:
-        # SECURITY: Do NOT issue real tokens until MFA step is completed.
-        # Return a short-lived MFA challenge; real tokens are issued after OTP verification.
-        _log.info("mfa_required_triggered", extra={"email": email})
-        return {
-            "authenticated": False,
-            "requires_mfa": True,
-            "mfa": {"methods": ["email_otp", "totp", "backup_code"], "challenge": issue_otp(email, "login_mfa")},
-            # pending_mfa_email is used by the verify-otp endpoint to know which user to finalize
-            "pending_mfa_email": email,
-        }
+        if user.get("totp_secret") and user.get("mfa_enabled"):
+            return {
+                "authenticated": False,
+                "requires_mfa": True,
+                "mfa_configured": True,
+                "mfa": {"methods": ["totp", "backup_code"]},
+                "pending_mfa_email": email,
+            }
+        else:
+            enroll = enroll_mfa(email)
+            return {
+                "authenticated": False,
+                "requires_mfa": True,
+                "mfa_configured": False,
+                "mfa": {"methods": ["totp"]},
+                "pending_mfa_email": email,
+                "totp_secret": enroll["totp_secret"],
+                "provisioning_uri": enroll["provisioning_uri"],
+            }
 
     # No MFA — issue tokens immediately (mark mfa_verified=True for non-admins and the non-production founder since they don't require MFA)
     mfa_verified = (user["role"] not in ("owner", "admin")) or is_founder
@@ -451,6 +450,7 @@ def verify_mfa(email: str, code: str) -> dict[str, object]:
 
 def verify_mfa_login(email: str, code: str) -> dict[str, object]:
     import pyotp
+    import secrets
     from backend.database.db import get_auth_user_by_email, update_user_mfa, mark_auth_user_login
     user = get_auth_user_by_email(email)
     if not user or not user.get("totp_secret"):
@@ -459,14 +459,25 @@ def verify_mfa_login(email: str, code: str) -> dict[str, object]:
     # Verify TOTP code
     totp = pyotp.TOTP(str(user["totp_secret"]))
     if totp.verify(code.strip(), valid_window=1):
+        recovery_codes_list = []
+        if not user.get("mfa_enabled"):
+            codes = [f"{secrets.token_hex(2)}-{secrets.token_hex(2)}" for _ in range(8)]
+            update_user_mfa(email, str(user["totp_secret"]), recovery_codes=",".join(codes), mfa_enabled=True)
+            write_audit_log("auth.mfa.enabled", actor=email, target=email, details={"method": "totp"})
+            recovery_codes_list = codes
+
         mark_auth_user_login(email)
         write_audit_log("auth.mfa.login.succeeded", actor=email, target=str(user["user_id"]), details={"method": "totp"})
         tokens = issue_tokens(email, role=str(user["role"]), organization_id=str(user["organization_id"]), mfa_verified=True)
-        return {
+        
+        response_data = {
             "authenticated": True,
             "tokens": tokens,
             "user": {"email": email, "role": str(user["role"]), "first_name": str(user.get("first_name", ""))},
         }
+        if recovery_codes_list:
+            response_data["recovery_codes"] = recovery_codes_list
+        return response_data
 
     # Verify recovery code
     recovery_codes_str = user.get("recovery_codes", "")

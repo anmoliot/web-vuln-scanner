@@ -200,6 +200,11 @@ async def auth_send_otp(request: Request, payload: OtpRequest) -> dict[str, obje
     check_rate_limit(request)
     check_auth_lockout(request)
     email = validate_email(payload.email)
+    if payload.purpose == "login_mfa":
+        raise HTTPException(
+            status_code=400,
+            detail="Email OTP is deprecated for Multi-Factor Authentication. Please use an Authenticator App.",
+        )
     return issue_otp(email, payload.purpose)
 
 
@@ -208,25 +213,16 @@ async def auth_verify_otp(request: Request, payload: OtpRequest, response: Respo
     check_rate_limit(request)
     check_auth_lockout(request)
     email = validate_email(payload.email)
+    if payload.purpose == "login_mfa":
+        raise HTTPException(
+            status_code=400,
+            detail="Email OTP is not supported for Multi-Factor Authentication. Please use an Authenticator App.",
+        )
     result = verify_otp(email, payload.code, payload.purpose)
     if not result.get("verified"):
         record_auth_failure(_client_ip(request))
     else:
         clear_auth_failures(_client_ip(request))
-        if payload.purpose == "login_mfa":
-            user = get_auth_user_by_email(email)
-            if user:
-                tokens = issue_tokens(email, role=str(user["role"]), organization_id=str(user["organization_id"]), mfa_verified=True)
-                result["authenticated"] = True
-                result["tokens"] = tokens
-                result["user"] = {"email": email, "role": str(user["role"]), "first_name": str(user.get("first_name", ""))}
-                set_auth_cookies(
-                    response,
-                    access_token=str(tokens.get("access_token", "")),
-                    refresh_token=str(tokens.get("refresh_token", "")),
-                )
-                csrf_token = set_csrf_cookie(response)
-                result["csrf_token"] = csrf_token
     return result
 
 
@@ -274,7 +270,7 @@ async def auth_me(request: Request, principal: Principal = Depends(current_princ
     token = _extract_token(request)
     payload = _verify_jwt(token) if token else {}
     
-    mfa_enabled = bool(user.get("mfa_required") or user.get("mfa_enabled") or user.get("totp_secret")) if user else False
+    mfa_enabled = (user["role"] in ("owner", "admin") or bool(user.get("mfa_enabled"))) if user else False
     mfa_verified = bool(payload.get("mfa_verified", False))
     
     is_founder = (principal.actor.lower() == settings.founder_email.lower()) and (settings.execution_mode != "production")

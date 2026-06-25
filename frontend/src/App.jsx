@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { EnterpriseLayout } from "./components/EnterpriseLayout.jsx";
 import { Home } from "./pages/Home.jsx";
@@ -99,8 +99,28 @@ function RouteFallbackPage({ page }) {
 }
 
 function AppContent() {
-  const [page, setPage] = useState("marketing");
+  const [page, setPageState] = useState(() => {
+    const path = window.location.pathname.replace(/^\//, "");
+    return path || "marketing";
+  });
   const { isAuthenticated, loading, logout, user, backendOffline, authReady } = useAuth();
+
+  const setPage = useCallback((newPage) => {
+    setPageState(newPage);
+    const targetPath = newPage === "marketing" ? "/" : `/${newPage}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState(null, "", targetPath);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname.replace(/^\//, "");
+      setPageState(path || "marketing");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     // Single cohesive cyberpunk theme only (never mention light/dark mode selection)
@@ -242,6 +262,9 @@ function AppContent() {
 
   // ── PUBLIC PAGES (marketing, auth, etc.) ──────────────────────────────────
   if (publicPages.has(page)) {
+    if (page === "marketing") {
+      return <MarketingHome onNavigate={setPage} isAuthenticated={isAuthenticated} logout={logout} />;
+    }
     return (
       <div className="public-shell">
         <header className="public-nav">
@@ -536,8 +559,8 @@ function CustomCursor() {
           width: "6px",
           height: "6px",
           borderRadius: "50%",
-          backgroundColor: "#00ffff",
-          boxShadow: "0 0 8px #00ffff, 0 0 15px #00ffff",
+          backgroundColor: "#ffffff",
+          boxShadow: "0 0 8px #ffffff, 0 0 15px #ffffff",
           transform: `translate3d(${position.x - 3}px, ${position.y - 3}px, 0)`,
           pointerEvents: "none",
           zIndex: 99999,
@@ -554,11 +577,11 @@ function CustomCursor() {
           width: hovered ? "36px" : "22px",
           height: hovered ? "36px" : "22px",
           borderRadius: "50%",
-          border: hovered ? "1.5px solid #ff0055" : "1px solid rgba(0, 255, 255, 0.4)",
-          backgroundColor: hovered ? "rgba(255, 0, 85, 0.04)" : "rgba(0, 255, 255, 0.01)",
+          border: hovered ? "1.5px solid #ff0055" : "1px solid rgba(255, 255, 255, 0.4)",
+          backgroundColor: hovered ? "rgba(255, 0, 85, 0.04)" : "rgba(255, 255, 255, 0.01)",
           boxShadow: hovered 
             ? "0 0 15px rgba(255, 0, 85, 0.3), inset 0 0 8px rgba(255, 0, 85, 0.1)" 
-            : "0 0 6px rgba(0, 255, 255, 0.1)",
+            : "0 0 6px rgba(255, 255, 255, 0.1)",
           transform: `translate3d(${trail.x - (hovered ? 18 : 11)}px, ${trail.y - (hovered ? 18 : 11)}px, 0) scale(${clicked ? 0.85 : 1})`,
           pointerEvents: "none",
           zIndex: 99998,
@@ -573,8 +596,18 @@ function CustomCursor() {
 export default function App() {
   return (
     <AuthProvider>
+      <video
+        autoPlay
+        muted
+        loop
+        playsInline
+        className="fixed inset-0 w-full h-full object-cover pointer-events-none opacity-20 z-0"
+        src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260622_092455_089c54f8-3b03-4966-9df1-e9746063d0ef.mp4"
+      />
       <CustomCursor />
-      <AppContent />
+      <div className="relative z-10 w-full min-h-screen">
+        <AppContent />
+      </div>
     </AuthProvider>
   );
 }

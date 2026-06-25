@@ -73,9 +73,8 @@ def test_register_login_and_otp_flow(monkeypatch):
     assert "pending_mfa_email" in login
     assert "mfa" in login
 
-    wrong_otp_response = client.post("/api/auth/otp/verify", json={"email": email, "code": "123456", "purpose": "login_mfa"})
-    assert wrong_otp_response.status_code == 200
-    assert wrong_otp_response.json()["verified"] is False
+    wrong_otp_response = client.post("/api/auth/mfa/verify-login", json={"email": email, "code": "123456"})
+    assert wrong_otp_response.status_code == 400
 
     # Note: In production, the OTP code is sent via email/TOTP app.
     # In tests, we'd need to query the DB or mock the OTP store.
@@ -97,19 +96,19 @@ def test_auth_bootstrap_after_mfa_and_logout_clears_session():
     assert local_client.post("/api/auth/register", json=payload).status_code == 200
     login_response = local_client.post("/api/auth/login", json={"email": email, "password": password})
     assert login_response.status_code == 200
-    assert login_response.json()["requires_mfa"] is True
+    res_data = login_response.json()
+    assert res_data["requires_mfa"] is True
+    assert res_data["mfa_configured"] is False
     assert local_client.get("/api/auth/me").status_code == 401
 
-    code = "654321"
-    store_otp_challenge(
-        email=email,
-        purpose="login_mfa",
-        code_hash=_otp_hash(email, "login_mfa", code),
-        expires_at=4_102_444_800,
-    )
-    mfa_response = local_client.post("/api/auth/otp/verify", json={"email": email, "code": code, "purpose": "login_mfa"})
+    import pyotp
+    totp = pyotp.TOTP(res_data["totp_secret"])
+    code = totp.now()
+
+    mfa_response = local_client.post("/api/auth/mfa/verify-login", json={"email": email, "code": code})
     assert mfa_response.status_code == 200
     assert mfa_response.json()["authenticated"] is True
+    assert "recovery_codes" in mfa_response.json()
     assert mfa_response.json()["tokens"]["access_token"].count(".") == 2
 
     me = local_client.get("/api/auth/me")

@@ -794,6 +794,7 @@ def get_auth_user_by_email(email: str) -> dict[str, object] | None:
         "role": row[6],
         "password_hash": row[7],
         "mfa_required": bool(row[8]),
+        "mfa_enabled": bool(row[8]),
         "totp_secret": row[9],
         "recovery_codes": row[10],
         "created_at": row[11],
