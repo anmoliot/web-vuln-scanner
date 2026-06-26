@@ -33,9 +33,7 @@ Engine -->|Output| Rep [Evidence & PDF/HTML Reports]
 ## 🔑 Access Credentials & Tech Stack
 
 ### Authentication
-* **Default Seeding Credentials:**
-  * **Email:** `test@test.com`
-  * **Password:** `Test@1234`
+
 * **Flow:** Multi-factor authentication fallback configured with secure JWT session tokens (HS256).
 
 ### Technology Stack Highlights
